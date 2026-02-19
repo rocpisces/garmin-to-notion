@@ -169,6 +169,7 @@ def main():
         raise RuntimeError("Fetched Garmin data but could not parse.")
 
     count = 0
+     count = 0
     for r in records:
         # Determine date
         date_str = None
@@ -178,6 +179,7 @@ def main():
             date_str = r["date"]
         elif "startTimeInSeconds" in r:
             date_str = iso_date(datetime.fromtimestamp(int(r["startTimeInSeconds"]), TZ))
+
         if not date_str:
             continue
 
@@ -189,17 +191,18 @@ def main():
         if d < start or d > today:
             continue
 
-        # Parse fields
+        # 统一处理单位
         weight = to_kg_maybe(r.get("weight") or r.get("weightInKg"))
-body_fat_pct = to_float(r.get("bodyFat") or r.get("bodyFatPct"))
-body_water_pct = to_float(r.get("bodyWater") or r.get("bodyWaterPct"))
-body_fat_kg = to_kg_maybe(r.get("fatMass") or r.get("bodyFatMass"))
-skeletal_muscle = to_kg_maybe(r.get("muscleMass") or r.get("skeletalMuscleMass"))
-bone_mass = to_kg_maybe(r.get("boneMass") or r.get("boneMassInKg"))
 
-bmi = to_float(r.get("bmi"))
+        body_fat_pct = to_float(r.get("bodyFat") or r.get("bodyFatPct"))
+        body_water_pct = to_float(r.get("bodyWater") or r.get("bodyWaterPct"))
 
-change = to_kg_delta_maybe(r.get("delta") or r.get("change") or r.get("weightDelta"))
+        body_fat_kg = to_kg_maybe(r.get("fatMass") or r.get("bodyFatMass"))
+        skeletal_muscle = to_kg_maybe(r.get("muscleMass") or r.get("skeletalMuscleMass"))
+        bone_mass = to_kg_maybe(r.get("boneMass") or r.get("boneMassInKg"))
+
+        bmi = to_float(r.get("bmi"))
+        change = to_kg_delta_maybe(r.get("delta") or r.get("change") or r.get("weightDelta"))
 
         props = {
             "Date": {"date": {"start": date_str}},
@@ -222,6 +225,7 @@ change = to_kg_delta_maybe(r.get("delta") or r.get("change") or r.get("weightDel
         result = notion_upsert_weight(notion_token, notion_db_id, date_str, props)
         count += 1
         print(f"{date_str}: {result}")
+
 
     print(f"Done. Upserted {count} weight records (last {DAYS_BACK} days).")
 
