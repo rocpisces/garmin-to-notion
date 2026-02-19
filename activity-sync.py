@@ -166,6 +166,11 @@ def main():
 
         # 详情（很多字段在 summaryDTO 里）
         details = garmin.get_activity_details(activity_id) or {}
+        print("==== ACTIVITY ID:", activity_id)
+        print("DETAIL KEYS:", details.keys())
+        print("SUMMARY KEYS:", details.get("summaryDTO", {}).keys())
+        print("DETAIL SAMPLE:", str(details)[:2000])
+        break
         summary = details.get("summaryDTO", {}) if isinstance(details, dict) else {}
 
         distance_km = meter_to_km(act.get("distance"))
