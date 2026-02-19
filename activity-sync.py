@@ -167,7 +167,9 @@ def main():
         # 详情（很多字段在 summaryDTO 里）
         activity = garmin.get_activity(activity_id) or {}
         summary = activity.get("summaryDTO", {}) or {}
-        training = activity.get("activityTrainingEffect", {}) or {}
+        training = activity.get("activityTrainingEffect") or details.get("activityTrainingEffect") or {}
+        details = garmin.get_activity_details(activity_id) or {}
+
 
 
         distance_km = meter_to_km(act.get("distance"))
@@ -181,25 +183,18 @@ def main():
         best_pace = speed_mps_to_pace_min_per_km(act.get("maxSpeed"))
 
         # 兜底：有些字段在 summaryDTO
-        avg_power = summary.get("averagePower")
-        max_power = summary.get("maxPower")
+        avg_power = summary.get("averagePower") or details.get("averagePower")
+        max_power = summary.get("maxPower") or details.get("maxPower")
+
 
         aerobic_te = training.get("aerobicTrainingEffect")
         anaerobic_te = training.get("anaerobicTrainingEffect")
 
-        avg_cadence = summary.get("averageRunCadence")
+        avg_cadence = summary.get("averageRunCadence") or details.get("averageRunCadence")
 
 
         # 心率区间：多 key 兜底
-        hr_zones = (
-            activity.get("timeInHRZone")
-            or activity.get("timeInHrZone")
-            or activity.get("timeInHeartRateZones")
-            or summary.get("timeInHRZone")
-            or summary.get("timeInHrZone")
-            or summary.get("timeInHeartRateZones")
-            or []
-        )
+        hr_zones = details.get("timeInHRZone") or details.get("timeInHeartRateZones") or []
 
 
         z1 = z2 = z3 = z4 = z5 = None
