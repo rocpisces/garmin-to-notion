@@ -68,32 +68,79 @@ def main():
     # 若都不可用，会抛错并在 Actions 日志里看到（我们再按你的实际返回改）。
     records = []
 
-    # 方案 A：按日期区间取
-    for getter_name in ["get_body_composition_by_date_range", "get_body_composition"]:
-        getter = getattr(garmin, getter_name, None)
-        if callable(getter):
-            try:
-                if getter_name == "get_body_composition_by_date_range":
-                    data = getter(start.isoformat(), today.isoformat())
-                else:
-                    # 有的版本返回最近一段时间，需要自己筛
-                    data = getter()
-                # data 可能是 dict 或 list
-                if isinstance(data, dict) and "dateWeightList" in data:
-                    records = data["dateWeightList"]
-                elif isinstance(data, list):
-                    records = data
-                elif isinstance(data, dict) and "weightList" in data:
-                    records = data["weightList"]
-                else:
-                    # 兜底：尝试直接当 list 处理
-                    records = data
+    # ---------- DEBUG: 列出所有可能的接口名 ----------
+    candidates = sorted([
+        m for m in dir(garmin)
+        if any(k in m.lower() for k in ["weight", "body", "composition"])
+    ])
+    print("Garmin methods containing weight/body/composition:")
+    print(", ".join(candidates))
+    # --------------------------------------------------
+
+    def try_call(method_name, *args, **kwargs):
+        fn = getattr(garmin, method_name, None)
+        if not callable(fn):
+            return None
+        try:
+            return fn(*args, **kwargs)
+        except TypeError:
+            return None
+        except Exception as e:
+            print(f"[WARN] {method_name}{args} failed: {type(e).__name__}: {e}")
+            return None
+
+    # ---------- 尝试尽可能多的常见方法组合 ----------
+    start_s = start.isoformat()
+    end_s = today.isoformat()
+
+    attempts = [
+        ("get_body_composition_by_date_range", (start_s, end_s), {}),
+        ("get_body_composition_by_date_range", (start_s,), {}),
+        ("get_body_composition", (start_s, end_s), {}),
+        ("get_body_composition", (start_s,), {}),
+        ("get_body_composition", tuple(), {}),
+        ("get_body_composition_data", (start_s, end_s), {}),
+        ("get_body_composition_data", tuple(), {}),
+        ("get_weight_data", (start_s, end_s), {}),
+        ("get_weight_data", tuple(), {}),
+        ("get_weight_by_date_range", (start_s, end_s), {}),
+        ("get_weight_by_date_range", tuple(), {}),
+        ("get_body_weight", (start_s, end_s), {}),
+        ("get_body_weight", tuple(), {}),
+    ]
+
+    data = None
+    for name, args, kwargs in attempts:
+        data = try_call(name, *args, **kwargs)
+        if data:
+            print(f"[OK] Using {name}{args}")
+            break
+
+    if not data:
+        raise RuntimeError(
+            "No body composition records fetched. "
+            "See printed method list above; we will pick the correct one."
+        )
+
+    # ---------- 统一把各种返回结构归一成 records(list[dict]) ----------
+    records = []
+    if isinstance(data, dict):
+        # 常见 key 兜底（不同版本会不一样）
+        for key in ["dateWeightList", "weightList", "dailyBodyComp", "bodyCompList", "weighIns", "items"]:
+            if key in data and isinstance(data[key], list):
+                records = data[key]
                 break
-            except Exception:
-                continue
+        if not records and isinstance(data.get("data"), list):
+            records = data["data"]
+    elif isinstance(data, list):
+        records = data
 
     if not records:
-        raise RuntimeError("No body composition records fetched from Garmin API.")
+        # 把 data 打出来（截断）便于我们看结构
+        print("Raw data type:", type(data))
+        print("Raw data preview:", str(data)[:1500])
+        raise RuntimeError("Fetched data but could not parse records list.")
+
 
     # 统一解析并 upsert
     count = 0
