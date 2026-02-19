@@ -14,7 +14,7 @@ jobs:
       GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
       NOTION_WEIGHT_DB_ID: ${{ secrets.NOTION_WEIGHT_DB_ID }}
-      DAYS_BACK: "30"
+      DAYS_BACK: "90"
     steps:
       - uses: actions/checkout@v4
 
