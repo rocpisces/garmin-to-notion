@@ -165,13 +165,13 @@ def main():
         activity_type = pick(act, ("activityType", "typeKey"), default=None)
 
         # 详情（很多字段在 summaryDTO 里）
-        details = garmin.get_activity_details(activity_id) or {}
-        print("==== ACTIVITY ID:", activity_id)
-        print("DETAIL KEYS:", details.keys())
-        print("SUMMARY KEYS:", details.get("summaryDTO", {}).keys())
-        print("DETAIL SAMPLE:", str(details)[:2000])
+        activity = garmin.get_activity(activity_id) or {}
+        print("SUMMARY KEYS:", summary.keys())
+        print("TRAINING:", training)
         break
-        summary = details.get("summaryDTO", {}) if isinstance(details, dict) else {}
+        summary = activity.get("summaryDTO", {})
+        training = activity.get("activityTrainingEffect", {})
+
 
         distance_km = meter_to_km(act.get("distance"))
         duration_min = sec_to_min(act.get("duration"))
@@ -184,13 +184,14 @@ def main():
         best_pace = speed_mps_to_pace_min_per_km(act.get("maxSpeed"))
 
         # 兜底：有些字段在 summaryDTO
-        avg_power = pick(details, ("averagePower",), ("summaryDTO", "averagePower"), default=None)
-        max_power = pick(details, ("maxPower",), ("summaryDTO", "maxPower"), default=None)
+        avg_power = summary.get("averagePower")
+        max_power = summary.get("maxPower")
 
-        aerobic_te = pick(details, ("aerobicTrainingEffect",), ("summaryDTO", "aerobicTrainingEffect"), default=None)
-        anaerobic_te = pick(details, ("anaerobicTrainingEffect",), ("summaryDTO", "anaerobicTrainingEffect"), default=None)
+        aerobic_te = training.get("aerobicTrainingEffect")
+        anaerobic_te = training.get("anaerobicTrainingEffect")
 
-        avg_cadence = pick(details, ("averageRunCadence",), ("summaryDTO", "averageRunCadence"), default=None)
+        avg_cadence = summary.get("averageRunCadence")
+
 
         # 心率区间：多 key 兜底
         hr_zones = (
