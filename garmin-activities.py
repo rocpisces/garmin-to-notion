@@ -297,7 +297,7 @@ def main():
     garmin_fetch_limit = int(os.getenv("GARMIN_ACTIVITIES_FETCH_LIMIT", "1000"))
 
     # Initialize Garmin client and login
-    garmin_client = GarminClient(garmin_email, garmin_password)
+    garmin_client = GarminClient(garmin_email, garmin_password,is_cn=True)
     garmin_client.login()
     notion_client = NotionClient(auth=notion_token)
 
