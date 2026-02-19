@@ -17,6 +17,25 @@ def to_float(x):
     except Exception:
         return None
 
+def to_kg_maybe(x):
+    """如果是克单位自动转成kg"""
+    v = to_float(x)
+    if v is None:
+        return None
+    if v > 200:   # 超过200基本可以确定是克单位
+        return v / 1000.0
+    return v
+
+def to_kg_delta_maybe(x):
+    """体重变化可能是克单位"""
+    v = to_float(x)
+    if v is None:
+        return None
+    if abs(v) > 20:  # 日变化不可能超过20kg
+        return v / 1000.0
+    return v
+
+
 # ------------------ Notion API Helpers ------------------
 
 NOTION_VERSION = os.getenv("NOTION_VERSION", "2022-06-28")
@@ -171,14 +190,16 @@ def main():
             continue
 
         # Parse fields
-        weight = to_float(r.get("weight") or r.get("weightInKg"))
-        body_fat_pct = to_float(r.get("bodyFat") or r.get("bodyFatPct"))
-        body_water_pct = to_float(r.get("bodyWater") or r.get("bodyWaterPct"))
-        body_fat_kg = to_float(r.get("fatMass") or r.get("bodyFatMass"))
-        skeletal_muscle = to_float(r.get("muscleMass") or r.get("skeletalMuscleMass"))
-        bone_mass = to_float(r.get("boneMass") or r.get("boneMassInKg"))
-        bmi = to_float(r.get("bmi"))
-        change = to_float(r.get("delta") or r.get("change") or r.get("weightDelta"))
+        weight = to_kg_maybe(r.get("weight") or r.get("weightInKg"))
+body_fat_pct = to_float(r.get("bodyFat") or r.get("bodyFatPct"))
+body_water_pct = to_float(r.get("bodyWater") or r.get("bodyWaterPct"))
+body_fat_kg = to_kg_maybe(r.get("fatMass") or r.get("bodyFatMass"))
+skeletal_muscle = to_kg_maybe(r.get("muscleMass") or r.get("skeletalMuscleMass"))
+bone_mass = to_kg_maybe(r.get("boneMass") or r.get("boneMassInKg"))
+
+bmi = to_float(r.get("bmi"))
+
+change = to_kg_delta_maybe(r.get("delta") or r.get("change") or r.get("weightDelta"))
 
         props = {
             "Date": {"date": {"start": date_str}},
