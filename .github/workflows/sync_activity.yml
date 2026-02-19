@@ -11,13 +11,28 @@ jobs:
       GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
       GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+
       NOTION_ACTIVITY_DB_ID: ${{ secrets.NOTION_ACTIVITY_DB_ID }}
+      NOTION_SPLITS_DB_ID: ${{ secrets.NOTION_SPLITS_DB_ID }}
+      NOTION_FILES_DB_ID: ${{ secrets.NOTION_FILES_DB_ID }}
+
       DAYS_BACK: "30"
+
       HR_Z1_MAX: ${{ secrets.HR_Z1_MAX }}
       HR_Z2_MAX: ${{ secrets.HR_Z2_MAX }}
       HR_Z3_MAX: ${{ secrets.HR_Z3_MAX }}
       HR_Z4_MAX: ${{ secrets.HR_Z4_MAX }}
       HR_Z5_MAX: ${{ secrets.HR_Z5_MAX }}
+
+      # 可选：功率区间上限（建议也加上，否则兜底分桶会用默认值）
+      PZ1_MAX: ${{ secrets.PZ1_MAX }}
+      PZ2_MAX: ${{ secrets.PZ2_MAX }}
+      PZ3_MAX: ${{ secrets.PZ3_MAX }}
+      PZ4_MAX: ${{ secrets.PZ4_MAX }}
+      PZ5_MAX: ${{ secrets.PZ5_MAX }}
+
+      # 可选：如果你用的是 Garmin 中国区登录
+      GARMIN_IS_CN: "1"
 
     steps:
       - uses: actions/checkout@v4
