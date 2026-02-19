@@ -75,7 +75,15 @@ def main():
     garmin_password = os.environ["GARMIN_PASSWORD"]
     notion_token = os.environ["NOTION_TOKEN"]
     notion_db_id = os.environ["NOTION_WEIGHT_DB_ID"]
+    print("NOTION_WEIGHT_DB_ID =", notion_db_id)
 
+    # 诊断：直接 GET 数据库对象，看 Notion 到底认不认这个 ID
+    diag_url = f"https://api.notion.com/v1/databases/{notion_db_id}"
+    r = requests.get(diag_url, headers=notion_headers(notion_token), timeout=30)
+    print("Notion GET /databases status:", r.status_code)
+    print("Notion GET /databases body (first 300 chars):", r.text[:300])
+
+    
     garmin = Garmin(garmin_email, garmin_password, is_cn=True)
     garmin.login()
 
