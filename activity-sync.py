@@ -166,9 +166,15 @@ def main():
 
         # 详情（很多字段在 summaryDTO 里）
         activity = garmin.get_activity(activity_id) or {}
-        summary = activity.get("summaryDTO", {}) or {}
-        training = activity.get("activityTrainingEffect") or details.get("activityTrainingEffect") or {}
         details = garmin.get_activity_details(activity_id) or {}
+
+        summary = activity.get("summaryDTO", {}) or {}
+        training = (
+            activity.get("activityTrainingEffect")
+            or details.get("activityTrainingEffect")
+            or {}
+        )
+
 
 
 
@@ -190,11 +196,17 @@ def main():
         aerobic_te = training.get("aerobicTrainingEffect")
         anaerobic_te = training.get("anaerobicTrainingEffect")
 
+
         avg_cadence = summary.get("averageRunCadence") or details.get("averageRunCadence")
 
 
         # 心率区间：多 key 兜底
-        hr_zones = details.get("timeInHRZone") or details.get("timeInHeartRateZones") or []
+        hr_zones = (
+            details.get("timeInHRZone")
+            or details.get("timeInHeartRateZones")
+            or []
+        )
+
 
 
         z1 = z2 = z3 = z4 = z5 = None
