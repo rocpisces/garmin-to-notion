@@ -166,11 +166,8 @@ def main():
 
         # 详情（很多字段在 summaryDTO 里）
         activity = garmin.get_activity(activity_id) or {}
-        print("SUMMARY KEYS:", summary.keys())
-        print("TRAINING:", training)
-        break
-        summary = activity.get("summaryDTO", {})
-        training = activity.get("activityTrainingEffect", {})
+        summary = activity.get("summaryDTO", {}) or {}
+        training = activity.get("activityTrainingEffect", {}) or {}
 
 
         distance_km = meter_to_km(act.get("distance"))
