@@ -13,6 +13,12 @@ jobs:
       NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
       NOTION_ACTIVITY_DB_ID: ${{ secrets.NOTION_ACTIVITY_DB_ID }}
       DAYS_BACK: "30"
+      HR_Z1_MAX: ${{ secrets.HR_Z1_MAX }}
+      HR_Z2_MAX: ${{ secrets.HR_Z2_MAX }}
+      HR_Z3_MAX: ${{ secrets.HR_Z3_MAX }}
+      HR_Z4_MAX: ${{ secrets.HR_Z4_MAX }}
+      HR_Z5_MAX: ${{ secrets.HR_Z5_MAX }}
+
     steps:
       - uses: actions/checkout@v4
 
