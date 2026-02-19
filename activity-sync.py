@@ -192,14 +192,15 @@ def main():
 
         # 心率区间：多 key 兜底
         hr_zones = (
-            details.get("timeInHRZone")
-            or details.get("timeInHrZone")
-            or details.get("timeInHeartRateZones")
+            activity.get("timeInHRZone")
+            or activity.get("timeInHrZone")
+            or activity.get("timeInHeartRateZones")
             or summary.get("timeInHRZone")
             or summary.get("timeInHrZone")
             or summary.get("timeInHeartRateZones")
             or []
         )
+
 
         z1 = z2 = z3 = z4 = z5 = None
         if isinstance(hr_zones, list):
