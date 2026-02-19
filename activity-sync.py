@@ -5,6 +5,7 @@ from garminconnect import Garmin
 
 TZ = timezone(timedelta(hours=8))
 DAYS_BACK = int(os.getenv("DAYS_BACK", "30"))
+PAGE_SIZE = int(os.getenv("PAGE_SIZE", "50"))
 NOTION_VERSION = "2022-06-28"
 
 
@@ -16,13 +17,10 @@ def notion_headers(token):
     }
 
 
-def notion_query_by_name(token, db_id, name):
+def notion_query_by_activity_id(token, db_id, activity_id: int):
     url = f"https://api.notion.com/v1/databases/{db_id}/query"
     payload = {
-        "filter": {
-            "property": "Activity Name",
-            "title": {"equals": name},
-        },
+        "filter": {"property": "Activity ID", "number": {"equals": int(activity_id)}},
         "page_size": 1,
     }
     r = requests.post(url, headers=notion_headers(token), json=payload, timeout=30)
@@ -31,8 +29,8 @@ def notion_query_by_name(token, db_id, name):
     return r.json()
 
 
-def notion_upsert(token, db_id, name, props):
-    existing = notion_query_by_name(token, db_id, name)
+def notion_upsert_by_activity_id(token, db_id, activity_id: int, props):
+    existing = notion_query_by_activity_id(token, db_id, activity_id)
     if existing.get("results"):
         page_id = existing["results"][0]["id"]
         url = f"https://api.notion.com/v1/pages/{page_id}"
@@ -56,22 +54,43 @@ def notion_upsert(token, db_id, name, props):
 def sec_to_min(x):
     try:
         return round(float(x) / 60.0, 2)
-    except:
+    except Exception:
         return None
 
 
 def meter_to_km(x):
     try:
         return round(float(x) / 1000.0, 3)
-    except:
+    except Exception:
         return None
 
 
-def sec_per_km_to_min(x):
+def speed_mps_to_pace_min_per_km(speed):
+    # pace = (1000m / speed m/s) seconds -> minutes
     try:
-        return round(float(x) / 60.0, 2)
-    except:
+        if not speed or float(speed) <= 0:
+            return None
+        sec_per_km = 1000.0 / float(speed)
+        return round(sec_per_km / 60.0, 2)
+    except Exception:
         return None
+
+
+def pick(d, *paths, default=None):
+    """
+    paths: list of tuples, each tuple is nested keys
+    """
+    for p in paths:
+        cur = d
+        ok = True
+        for k in p:
+            if not isinstance(cur, dict) or k not in cur:
+                ok = False
+                break
+            cur = cur[k]
+        if ok:
+            return cur
+    return default
 
 
 def maybe_number(props, name, val):
@@ -95,25 +114,59 @@ def main():
     garmin = Garmin(garmin_email, garmin_password, is_cn=True)
     garmin.login()
 
-    activities = garmin.get_activities(0, 50)
+    # 分页拉取直到覆盖 DAYS_BACK
+    cutoff = (datetime.now(TZ) - timedelta(days=DAYS_BACK)).date()
+
+    all_acts = []
+    start = 0
+    while True:
+        batch = garmin.get_activities(start, PAGE_SIZE)  # (start, limit)
+        if not batch:
+            break
+
+        all_acts.extend(batch)
+
+        # 看到最老的一条是否已经早于 cutoff？早于则可以停
+        last = batch[-1]
+        st = last.get("startTimeLocal")
+        if st:
+            # 常见格式: "2026-01-31 01:12:00"
+            try:
+                last_date = datetime.strptime(st, "%Y-%m-%d %H:%M:%S").date()
+                if last_date < cutoff:
+                    break
+            except Exception:
+                pass
+
+        start += PAGE_SIZE
+        if start > 2000:  # 安全阈值，防止异常死循环
+            break
 
     count = 0
 
-    for act in activities:
-
-        activity_id = act["activityId"]
-        activity_name = act.get("activityName", f"Activity {activity_id}")
-        activity_type = act.get("activityType", {}).get("typeKey")
+    for act in all_acts:
+        activity_id = act.get("activityId")
+        if not activity_id:
+            continue
 
         start_time = act.get("startTimeLocal")
         if not start_time:
             continue
 
-        date_obj = datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S")
-        if (datetime.now() - date_obj).days > DAYS_BACK:
+        try:
+            dt = datetime.strptime(start_time, "%Y-%m-%d %H:%M:%S").replace(tzinfo=TZ)
+        except Exception:
             continue
 
-        details = garmin.get_activity_details(activity_id)
+        if dt.date() < cutoff:
+            continue
+
+        activity_name = act.get("activityName") or f"Activity {activity_id}"
+        activity_type = pick(act, ("activityType", "typeKey"), default=None)
+
+        # 详情（很多字段在 summaryDTO 里）
+        details = garmin.get_activity_details(activity_id) or {}
+        summary = details.get("summaryDTO", {}) if isinstance(details, dict) else {}
 
         distance_km = meter_to_km(act.get("distance"))
         duration_min = sec_to_min(act.get("duration"))
@@ -122,49 +175,53 @@ def main():
         avg_hr = act.get("averageHR")
         max_hr = act.get("maxHR")
 
-        avg_speed = act.get("averageSpeed")
-        best_speed = act.get("maxSpeed")
+        avg_pace = speed_mps_to_pace_min_per_km(act.get("averageSpeed"))
+        best_pace = speed_mps_to_pace_min_per_km(act.get("maxSpeed"))
 
-        avg_pace = None
-        best_pace = None
+        # 兜底：有些字段在 summaryDTO
+        avg_power = pick(details, ("averagePower",), ("summaryDTO", "averagePower"), default=None)
+        max_power = pick(details, ("maxPower",), ("summaryDTO", "maxPower"), default=None)
 
-        if avg_speed:
-            avg_pace = sec_per_km_to_min(1000 / avg_speed)
+        aerobic_te = pick(details, ("aerobicTrainingEffect",), ("summaryDTO", "aerobicTrainingEffect"), default=None)
+        anaerobic_te = pick(details, ("anaerobicTrainingEffect",), ("summaryDTO", "anaerobicTrainingEffect"), default=None)
 
-        if best_speed:
-            best_pace = sec_per_km_to_min(1000 / best_speed)
+        avg_cadence = pick(details, ("averageRunCadence",), ("summaryDTO", "averageRunCadence"), default=None)
 
-        avg_power = details.get("averagePower")
-        max_power = details.get("maxPower")
+        # 心率区间：多 key 兜底
+        hr_zones = (
+            details.get("timeInHRZone")
+            or details.get("timeInHrZone")
+            or details.get("timeInHeartRateZones")
+            or summary.get("timeInHRZone")
+            or summary.get("timeInHrZone")
+            or summary.get("timeInHeartRateZones")
+            or []
+        )
 
-        aerobic_te = details.get("aerobicTrainingEffect")
-        anaerobic_te = details.get("anaerobicTrainingEffect")
-
-        avg_cadence = details.get("averageRunCadence")
-
-        # 心率区间
         z1 = z2 = z3 = z4 = z5 = None
+        if isinstance(hr_zones, list):
+            for z in hr_zones:
+                zn = z.get("zoneNumber") or z.get("zone") or z.get("zoneNum")
+                sec = z.get("seconds") or z.get("secs") or z.get("value")
+                m = sec_to_min(sec)
+                if zn == 1:
+                    z1 = m
+                elif zn == 2:
+                    z2 = m
+                elif zn == 3:
+                    z3 = m
+                elif zn == 4:
+                    z4 = m
+                elif zn == 5:
+                    z5 = m
 
-        hr_zones = details.get("timeInHRZone", [])
-
-        if hr_zones and isinstance(hr_zones, list):
-            for zone in hr_zones:
-                zone_num = zone.get("zoneNumber")
-                minutes = sec_to_min(zone.get("seconds"))
-                if zone_num == 1:
-                    z1 = minutes
-                elif zone_num == 2:
-                    z2 = minutes
-                elif zone_num == 3:
-                    z3 = minutes
-                elif zone_num == 4:
-                    z4 = minutes
-                elif zone_num == 5:
-                    z5 = minutes
+        # Title 建议带日期避免视觉重复（但唯一键仍是 Activity ID）
+        title = f"{dt.strftime('%Y-%m-%d')} · {activity_name}"
 
         props = {
-            "Activity Name": {"title": [{"text": {"content": activity_name}}]},
-            "Date": {"date": {"start": date_obj.isoformat()}},
+            "Activity Name": {"title": [{"text": {"content": title}}]},
+            "Date": {"date": {"start": dt.isoformat()}},
+            "Activity ID": {"number": float(activity_id)},
         }
 
         maybe_select(props, "Type", activity_type)
@@ -180,14 +237,15 @@ def main():
         maybe_number(props, "Avg Power", avg_power)
         maybe_number(props, "Max Power", max_power)
         maybe_number(props, "Avg Cadence", avg_cadence)
+
         maybe_number(props, "Z1 (min)", z1)
         maybe_number(props, "Z2 (min)", z2)
         maybe_number(props, "Z3 (min)", z3)
         maybe_number(props, "Z4 (min)", z4)
         maybe_number(props, "Z5 (min)", z5)
 
-        result = notion_upsert(notion_token, notion_activity_db_id, activity_name, props)
-        print(activity_name, result)
+        result = notion_upsert_by_activity_id(notion_token, notion_activity_db_id, activity_id, props)
+        print(activity_id, title, result)
         count += 1
 
     print("Done:", count, "activities synced.")
