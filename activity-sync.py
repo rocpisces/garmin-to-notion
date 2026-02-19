@@ -375,12 +375,22 @@ def maybe_get_file_link(garmin: Garmin, activity_id: int, ext: str, downloader_m
         # No download: still return a stable path (or URL if base is set)
         return file_url_from_local(path), None
 
-def extract_laps(details: dict) -> List[dict]:
-    for k in ("laps", "lapDTOs", "lapSummaries", "splits"):
-        arr = details.get(k)
+def extract_laps(obj: dict) -> List[dict]:
+    if not isinstance(obj, dict):
+        return []
+
+    # sometimes wrapped
+    if isinstance(obj.get("splits"), dict):
+        obj = obj["splits"]
+
+    # common keys
+    for k in ("lapDTOs", "laps", "lapSummaries", "splitSummaries"):
+        arr = obj.get(k)
         if isinstance(arr, list) and arr:
             return arr
+
     return []
+
 
 
 # -----------------------------
@@ -453,6 +463,15 @@ def main():
         details = safe_call(garmin, ["get_activity_details"], activity_id) or {}
         if not isinstance(details, dict):
             details = {}
+        # --- NEW: get splits from dedicated endpoint (Garmin often doesn't include laps in details) ---
+        splits_resp = safe_call(
+            garmin,
+            ["get_activity_splits", "get_activity_split_summaries"],
+            activity_id,
+        ) or {}
+        if not isinstance(splits_resp, dict):
+            splits_resp = {}
+
 
         distance_km = meter_to_km(act.get("distance") or summary.get("distance"))
         duration_s = act.get("duration") or summary.get("duration") or summary.get("elapsedDuration")
@@ -587,7 +606,9 @@ def main():
         # -----------------------------
         # 3) Upsert Splits
         # -----------------------------
-        laps = extract_laps(details)
+        laps = extract_laps(splits_resp)
+        print(f"  [Splits] laps found: {len(laps)}")  # 方便你看是不是拿到了
+
         for idx, lap in enumerate(laps, start=1):
             split_id = f"{activity_id}-L{idx}"
 
