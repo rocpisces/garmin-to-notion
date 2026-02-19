@@ -95,8 +95,20 @@ def main():
         sleep = (
             try_call(garmin, "get_sleep_data", date_str)
             or try_call(garmin, "get_sleep_data", d.strftime("%Y-%m-%d"))
-            or try_call(garmin, "get_sleep_data", d.strftime("%Y-%m-%dT00:00:00"))
         )
+
+        print("=== RAW SLEEP SAMPLE BEGIN ===")
+        print(str(sleep)[:3000])
+        print("=== RAW SLEEP SAMPLE END ===")
+
+        # 如果 sleep 里没东西也打印 HRV raw
+        hrv = (
+            try_call(garmin, "get_hrv_data", date_str)
+            or try_call(garmin, "get_hrv", date_str)
+        )
+        print("=== RAW HRV SAMPLE BEGIN ===")
+        print(str(hrv)[:3000])
+        print("=== RAW HRV SAMPLE END ===")
 
         if not sleep:
             # 没有睡眠就跳过（允许漏记/没戴表）
