@@ -50,23 +50,42 @@ def notion_upsert(token, db_id, date_str, props):
         return "created"
 
 
-def safe_get(d, *keys, default=None):
-    cur = d
-    for k in keys:
-        if not isinstance(cur, dict) or k not in cur:
-            return default
-        cur = cur[k]
-    return cur
-
-
-def try_call(obj, name, *args):
-    fn = getattr(obj, name, None)
-    if not callable(fn):
-        return None
+def sec_to_min(x):
     try:
-        return fn(*args)
+        return round(float(x) / 60.0, 1)
     except Exception:
         return None
+
+
+def ms_to_iso_local(ms):
+    try:
+        return datetime.fromtimestamp(int(ms) / 1000.0, TZ).isoformat()
+    except Exception:
+        return None
+
+
+def maybe_number(props, name, val):
+    if val is None:
+        return
+    props[name] = {"number": float(val)}
+
+
+def maybe_date(props, name, iso_str):
+    if not iso_str:
+        return
+    props[name] = {"date": {"start": iso_str}}
+
+
+def maybe_text(props, name, text):
+    if text is None:
+        return
+    props[name] = {"rich_text": [{"text": {"content": str(text)}}]}
+
+
+def maybe_select(props, name, option):
+    if option is None:
+        return
+    props[name] = {"select": {"name": str(option)}}
 
 
 def main():
@@ -78,108 +97,83 @@ def main():
     garmin = Garmin(garmin_email, garmin_password, is_cn=True)
     garmin.login()
 
-    # Debug: 看看库里到底有哪些 sleep/hrv 方法（跑通后你可以删）
-    cand = sorted([m for m in dir(garmin) if "sleep" in m.lower() or "hrv" in m.lower()])
-    print("Garmin methods containing sleep/hrv:")
-    print(", ".join(cand))
-
     today = datetime.now(TZ).date()
     start = today - timedelta(days=DAYS_BACK)
 
     count = 0
+
     for i in range(DAYS_BACK + 1):
         d = start + timedelta(days=i)
         date_str = d.isoformat()
 
-        # 取睡眠：不同版本方法名可能不同，这里做几个尝试
-        sleep = (
-            try_call(garmin, "get_sleep_data", date_str)
-            or try_call(garmin, "get_sleep_data", d.strftime("%Y-%m-%d"))
-        )
-
-        print("=== RAW SLEEP SAMPLE BEGIN ===")
-        print(str(sleep)[:3000])
-        print("=== RAW SLEEP SAMPLE END ===")
-
-        # 如果 sleep 里没东西也打印 HRV raw
-        hrv = (
-            try_call(garmin, "get_hrv_data", date_str)
-            or try_call(garmin, "get_hrv", date_str)
-        )
-        print("=== RAW HRV SAMPLE BEGIN ===")
-        print(str(hrv)[:3000])
-        print("=== RAW HRV SAMPLE END ===")
-
-        if not sleep:
-            # 没有睡眠就跳过（允许漏记/没戴表）
+        # Garmin CN: 睡眠
+        sleep = garmin.get_sleep_data(date_str)
+        if not sleep or "dailySleepDTO" not in sleep:
             continue
 
-        # 常见结构：dailySleepDTO / sleepSummary / 睡眠阶段列表
-        dto = safe_get(sleep, "dailySleepDTO", default={}) or sleep
+        dto = sleep["dailySleepDTO"]
 
-        # 下面字段在不同账号/版本里可能叫法不同，所以尽量多兜底
-        score = safe_get(dto, "sleepScores", "overall", "value", default=None)
-        if score is None:
-            score = safe_get(dto, "sleepScore", default=None)
+        # 必要字段
+        sleep_score = None
+        try:
+            sleep_score = dto["sleepScores"]["overall"]["value"]
+        except Exception:
+            pass
 
-        # 总睡眠/各阶段秒数（常见）
-        total_sec = safe_get(dto, "sleepTimeSeconds", default=None)
-        deep_sec = safe_get(dto, "deepSleepSeconds", default=None)
-        light_sec = safe_get(dto, "lightSleepSeconds", default=None)
-        rem_sec = safe_get(dto, "remSleepSeconds", default=None)
-        awake_sec = safe_get(dto, "awakeSleepSeconds", default=None)
+        total_min = sec_to_min(dto.get("sleepTimeSeconds"))
+        deep_min = sec_to_min(dto.get("deepSleepSeconds"))
+        light_min = sec_to_min(dto.get("lightSleepSeconds"))
+        rem_min = sec_to_min(dto.get("remSleepSeconds"))
+        awake_min = sec_to_min(dto.get("awakeSleepSeconds"))
 
-        # 入睡/醒来时间（常见用 epoch ms）
-        bedtime_ms = safe_get(dto, "sleepStartTimestampGMT", default=None) or safe_get(dto, "sleepStartTimestampLocal", default=None)
-        wake_ms = safe_get(dto, "sleepEndTimestampGMT", default=None) or safe_get(dto, "sleepEndTimestampLocal", default=None)
+        bedtime = ms_to_iso_local(dto.get("sleepStartTimestampLocal"))
+        wake_time = ms_to_iso_local(dto.get("sleepEndTimestampLocal"))
 
-        # 静息心率（有的在 dto，有的在 summary）
-        rhr = safe_get(dto, "restingHeartRate", default=None) or safe_get(sleep, "restingHeartRate", default=None)
+        # Garmin 里更稳定的是 avgHeartRate（不是 restingHeartRate）
+        resting_hr = dto.get("avgHeartRate")
 
-        # HRV：不同版本差异很大，这里尝试取一个“当日 HRV 值”
-        hrv_val = None
-        hrv = try_call(garmin, "get_hrv_data", date_str) or try_call(garmin, "get_hrv", date_str)
-        if isinstance(hrv, dict):
-            # 常见字段名兜底
-            hrv_val = hrv.get("hrvValue") or hrv.get("value") or safe_get(hrv, "data", 0, "value", default=None)
+        # Garmin CN: HRV（夜间均值）
+        hrv_ms = None
+        hrv_week = None
+        hrv_status = None
+        try:
+            hrv = garmin.get_hrv_data(date_str)
+            hrv_summary = hrv.get("hrvSummary", {})
+            hrv_ms = hrv_summary.get("lastNightAvg")
+            hrv_week = hrv_summary.get("weeklyAvg")
+            hrv_status = hrv_summary.get("status")
+        except Exception:
+            pass
 
-        def sec_to_min(x):
-            try:
-                return round(float(x) / 60.0, 1)
-            except Exception:
-                return None
-
-        def ms_to_iso(x):
-            try:
-                # Garmin 常用毫秒时间戳（本地/UTC混用）；这里按时间戳生成可读时间
-                return datetime.fromtimestamp(int(x) / 1000.0, TZ).isoformat()
-            except Exception:
-                return None
+        # “质量”用 Garmin 给的标签补上（Sleep Quality 在你数据里是 None）
+        sleep_grade = None
+        sleep_feedback = dto.get("sleepScoreFeedback")
+        try:
+            sleep_grade = dto["sleepScores"]["overall"]["qualifierKey"]  # EXCELLENT/GOOD/FAIR...
+        except Exception:
+            pass
 
         props = {
             "Date": {"date": {"start": date_str}},
         }
 
-        def maybe_set_number(name, val):
-            if val is None:
-                return
-            props[name] = {"number": float(val)}
+        # 你的数据库字段（已确认存在）
+        maybe_number(props, "Sleep Score", sleep_score)
+        maybe_number(props, "Total Sleep (min)", total_min)
+        maybe_number(props, "Deep (min)", deep_min)
+        maybe_number(props, "Light (min)", light_min)
+        maybe_number(props, "REM (min)", rem_min)
+        maybe_number(props, "Awake (min)", awake_min)
+        maybe_date(props, "Bedtime", bedtime)
+        maybe_date(props, "Wake Time", wake_time)
+        maybe_number(props, "Resting HR", resting_hr)
+        maybe_number(props, "HRV (ms)", hrv_ms)
 
-        def maybe_set_datetime(name, iso_str):
-            if not iso_str:
-                return
-            props[name] = {"date": {"start": iso_str}}
-
-        maybe_set_number("Sleep Score", score)
-        maybe_set_number("Total Sleep (min)", sec_to_min(total_sec))
-        maybe_set_number("Deep (min)", sec_to_min(deep_sec))
-        maybe_set_number("Light (min)", sec_to_min(light_sec))
-        maybe_set_number("REM (min)", sec_to_min(rem_sec))
-        maybe_set_number("Awake (min)", sec_to_min(awake_sec))
-        maybe_set_datetime("Bedtime", ms_to_iso(bedtime_ms))
-        maybe_set_datetime("Wake Time", ms_to_iso(wake_ms))
-        maybe_set_number("Resting HR", rhr)
-        maybe_set_number("HRV (ms)", hrv_val)
+        # 可选增强字段（如果你在 Notion 里新增了，就会写入；没新增也不影响）
+        maybe_number(props, "HRV Weekly Avg", hrv_week)
+        maybe_select(props, "HRV Status", hrv_status)
+        maybe_select(props, "Sleep Grade", sleep_grade)
+        maybe_text(props, "Sleep Feedback", sleep_feedback)
 
         result = notion_upsert(notion_token, notion_sleep_db_id, date_str, props)
         print(date_str, result)
