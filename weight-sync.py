@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from garminconnect import Garmin
-from notion_client import Client
+import requests
 
 # --------- Config ---------
 TZ = timezone(timedelta(hours=8))  # Asia/Shanghai
@@ -21,30 +21,61 @@ def to_float(x):
         return None
 
 
-def notion_query_by_date(notion: Client, db_id: str, date_str: str):
-    # Date property must be named "Date"
-    return notion.databases.query(
-        database_id=db_id,
-        filter={
+NOTION_VERSION = os.getenv("NOTION_VERSION", "2022-06-28")
+
+
+def notion_headers(token: str):
+    return {
+        "Authorization": f"Bearer {token}",
+        "Notion-Version": NOTION_VERSION,
+        "Content-Type": "application/json",
+    }
+
+
+def notion_query_by_date(notion_token: str, db_id: str, date_str: str):
+    # POST /v1/databases/{database_id}/query
+    url = f"https://api.notion.com/v1/databases/{db_id}/query"
+    payload = {
+        "filter": {
             "property": "Date",
             "date": {"equals": date_str},
         },
-        page_size=1,
-    )
+        "page_size": 1,
+    }
+    r = requests.post(url, headers=notion_headers(notion_token), json=payload, timeout=30)
+    if r.status_code >= 300:
+        raise RuntimeError(f"Notion query failed {r.status_code}: {r.text}")
+    return r.json()
 
 
-def notion_upsert_weight(notion: Client, db_id: str, date_str: str, props: dict):
-    existing = notion_query_by_date(notion, db_id, date_str)
+def notion_update_page(notion_token: str, page_id: str, props: dict):
+    url = f"https://api.notion.com/v1/pages/{page_id}"
+    payload = {"properties": props}
+    r = requests.patch(url, headers=notion_headers(notion_token), json=payload, timeout=30)
+    if r.status_code >= 300:
+        raise RuntimeError(f"Notion page update failed {r.status_code}: {r.text}")
+    return r.json()
+
+
+def notion_create_page(notion_token: str, db_id: str, props: dict):
+    url = "https://api.notion.com/v1/pages"
+    payload = {"parent": {"database_id": db_id}, "properties": props}
+    r = requests.post(url, headers=notion_headers(notion_token), json=payload, timeout=30)
+    if r.status_code >= 300:
+        raise RuntimeError(f"Notion page create failed {r.status_code}: {r.text}")
+    return r.json()
+
+
+def notion_upsert_weight(notion_token: str, db_id: str, date_str: str, props: dict):
+    existing = notion_query_by_date(notion_token, db_id, date_str)
     if existing.get("results"):
         page_id = existing["results"][0]["id"]
-        notion.pages.update(page_id=page_id, properties=props)
+        notion_update_page(notion_token, page_id, props)
         return "updated"
     else:
-        notion.pages.create(
-            parent={"database_id": db_id},
-            properties=props,
-        )
+        notion_create_page(notion_token, db_id, props)
         return "created"
+
 
 
 def main():
@@ -57,7 +88,6 @@ def main():
     garmin = Garmin(garmin_email, garmin_password, is_cn=True)
     garmin.login()
 
-    notion = Client(auth=notion_token)
 
     # 拉取最近 N 天体重（防漏记；每天 upsert）
     today = datetime.now(TZ).date()
@@ -205,7 +235,7 @@ def main():
         maybe_set("Body Water %", body_water_pct)
         maybe_set("BMI", bmi)
 
-        result = notion_upsert_weight(notion, notion_db_id, date_str, props)
+result = notion_upsert_weight(notion_token, notion_db_id, date_str, props)
         count += 1
         print(f"{date_str}: {result}")
 
